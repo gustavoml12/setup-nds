@@ -31,11 +31,10 @@ const busy = atom<StepId | null>('busy', null)
 const GLYPH = { ok: '✔', missing: '✘', skip: '–', unknown: '?' } as const
 const LABEL = { ok: 'ok', missing: 'falta', skip: 'não usado', unknown: '?' } as const
 
-async function runAction(busyId: StepId, action: () => Promise<void>): Promise<boolean> {
+async function runAction(busyId: StepId, action: () => Promise<boolean>): Promise<boolean> {
   set(busy, busyId)
   try {
-    await action()
-    return true
+    return await action()
   } catch (error) {
     set(state, { kind: 'error', message: String(error) })
     return false
@@ -44,17 +43,23 @@ async function runAction(busyId: StepId, action: () => Promise<void>): Promise<b
   }
 }
 
-async function audit(): Promise<void> {
+async function audit(): Promise<boolean> {
   set(state, { kind: 'loading' })
   try {
     const answer: AuditAnswer = await plugin.request('setup.audit')
     if (answer.noWorkspace) {
       set(state, { kind: 'no_workspace' })
-      return
+      return true
     }
-    set(state, answer.error ? { kind: 'error', message: answer.error } : { kind: 'ready', steps: answer.steps })
+    if (answer.error) {
+      set(state, { kind: 'error', message: answer.error })
+      return false
+    }
+    set(state, { kind: 'ready', steps: answer.steps })
+    return true
   } catch (error) {
     set(state, { kind: 'error', message: String(error) })
+    return false
   }
 }
 
@@ -66,11 +71,13 @@ async function fix(stepId: StepId): Promise<boolean> {
       if (answer.done) {
         if (!answer.ok) {
           set(state, { kind: 'error', message: answer.detail || 'Falha ao executar o conserto' })
-          throw new Error(answer.detail || 'Falha ao executar o conserto')
+          return false
         }
-        await audit()
+        if (!(await audit())) {
+          return false
+        }
         set(state, readyWithNote('concluído'))
-        return
+        return true
       }
       await new Promise((resolve) => setTimeout(resolve, 1500))
     }
@@ -81,6 +88,7 @@ async function loginGitlab(): Promise<boolean> {
   return runAction('glab-auth', async () => {
     const answer = await plugin.request('setup.gitlab')
     set(state, readyWithNote(answer.detail))
+    return true
   })
 }
 
@@ -88,6 +96,7 @@ async function cloneProjects(): Promise<boolean> {
   return runAction('clone', async () => {
     const answer = await plugin.request('setup.clone')
     set(state, readyWithNote(answer.detail))
+    return true
   })
 }
 

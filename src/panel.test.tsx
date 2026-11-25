@@ -120,3 +120,46 @@ test('Finding 3: no_workspace renderiza botão Verificar e nenhum botão Consert
   assert.deepEqual(view.errors, [])
   await view.unmount()
 })
+
+test('Finding A: falha na re-auditoria pós-fix interrompe o loop Consertar tudo e exibe erro', async () => {
+  let auditCount = 0
+  let fixCalls: string[] = []
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => {
+        auditCount++
+        if (auditCount === 1) {
+          return {
+            platform: 'darwin',
+            steps: [
+              { id: 'vscode', title: 'VS Code', group: 'ferramentas', status: 'missing' },
+              { id: 'git', title: 'Git', group: 'ferramentas', status: 'missing' }
+            ]
+          }
+        }
+        // Segunda auditoria (re-audit após fix do vscode) falha
+        throw new Error('re-audit falhou')
+      },
+      'setup.fix': (params: unknown) => {
+        const { stepId } = (params || {}) as { stepId?: string }
+        if (stepId) fixCalls.push(stepId)
+        return { done: true, ok: true, detail: 'concluído' }
+      }
+    }
+  })
+  const view = await mount(panel, { host })
+  assert.equal(auditCount, 1, 'primeiro audit montado')
+
+  const fixAll = view.find({ text: /Consertar tudo \(2\)/ })
+  assert.ok(fixAll, 'botão Consertar tudo encontrado')
+  await view.press(fixAll)
+
+  // fix foi chamado para o vscode, mas a re-auditoria falhou -> loop NÃO continuou para git
+  assert.deepEqual(fixCalls, ['vscode'], 'setup.fix foi chamado apenas uma vez')
+  assert.equal(auditCount, 2, 'audit tentou rodar pela segunda vez')
+  assert.ok(view.find({ text: /re-audit falhou/ }), 'estado de erro exibido na tela')
+  assert.ok(view.find({ text: /Tentar de novo/ }), 'botão Tentar de novo disponível')
+  assert.equal(view.find({ text: /Setup/ }), null, 'não exibe checklist pronto')
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})

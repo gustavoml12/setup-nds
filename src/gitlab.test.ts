@@ -65,10 +65,36 @@ describe('parseIssues', () => {
     assert.deepEqual(issues, [])
   })
 
-  test('sem usuário logado → error, nunca throw', () => {
-    const { issues, error } = parseIssues(['NO""_USER', 'ISSUES_DONE'].join('\n'))
+  test('sem usuário logado → error específico, nunca throw', () => {
+    const { issues, error } = parseIssues(['NO_USER', 'ISSUES_DONE'].join('\n'))
     assert.deepEqual(issues, [])
-    assert.ok(error)
+    assert.equal(error, 'não consegui identificar seu usuário no GitLab')
+  })
+})
+
+describe('issuesCommand', () => {
+  test('win32 usa sentinela de concatenação e define GITLAB_HOST', () => {
+    const cmd = issuesCommand('win32')
+    assert.ok(cmd.includes("('NO' + '_USER')"))
+    assert.ok(!cmd.includes('"NO""_USER"'))
+    assert.ok(cmd.includes('$env:GITLAB_HOST'))
+    assert.ok(cmd.includes('nds.unirv.edu.br/gitlab'))
+  })
+
+  test('posix define GITLAB_HOST antes de ambas as chamadas glab api', () => {
+    const cmd = issuesCommand('darwin')
+    assert.ok(cmd.includes('GITLAB_HOST=nds.unirv.edu.br/gitlab glab api user'))
+    assert.ok(cmd.includes('GITLAB_HOST=nds.unirv.edu.br/gitlab glab api "issues?'))
+    assert.ok(cmd.includes('echo NO""_USER'))
+  })
+
+  test('nenhum comando win32 usa operador de cadeia do PowerShell 7', () => {
+    const winIssues = issuesCommand('win32')
+    const winClone = cloneCommand(['g/a'], 'C:\\dev', 'win32')
+    for (const cmd of [winIssues, winClone]) {
+      assert.ok(!cmd.includes('&&'), `win32 tem && em ${cmd}`)
+      assert.ok(!cmd.includes('||'), `win32 tem || em ${cmd}`)
+    }
   })
 })
 

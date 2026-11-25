@@ -33,16 +33,17 @@ export function issuesCommand(platform: Platform): string {
   const block = cmdPlatform(platform)
   if (block === 'win32') {
     return (
+      `$env:GITLAB_HOST = '${GITLAB_HOST_ARG}'; ` +
       `$U = (glab api user 2>$null | ConvertFrom-Json).username; ` +
-      `if ([string]::IsNullOrWhiteSpace($U)) { "NO""_USER" } else { ` +
+      `if ([string]::IsNullOrWhiteSpace($U)) { ('NO' + '_USER') } else { ` +
       `glab api "issues?scope=all&state=opened&assignee_username=$U&per_page=100" 2>$null | Out-String -Stream | Where-Object { $_ -ne '' } | ForEach-Object { $_ }; ` +
       `}; ${markerEcho(ISSUES_MARKER, block)}`
     )
   }
   return (
-    `U=$(glab api user 2>/dev/null | tr -d '\\n' | sed -n 's/.*"username":"\\([^"]*\\)".*/\\1/p'); ` +
+    `U=$(GITLAB_HOST=${GITLAB_HOST_ARG} glab api user 2>/dev/null | tr -d '\\n' | sed -n 's/.*"username":"\\([^"]*\\)".*/\\1/p'); ` +
     `if [ -z "$U" ]; then echo NO""_USER; ` +
-    `else glab api "issues?scope=all&state=opened&assignee_username=$U&per_page=100" 2>/dev/null | tr -d '\\n'; echo; fi; ` +
+    `else GITLAB_HOST=${GITLAB_HOST_ARG} glab api "issues?scope=all&state=opened&assignee_username=$U&per_page=100" 2>/dev/null | tr -d '\\n'; echo; fi; ` +
     markerEcho(ISSUES_MARKER, block)
   )
 }

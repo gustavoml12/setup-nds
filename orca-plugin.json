@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 2,
+  "id": "setup-clinica-veterinaria",
+  "name": "Setup Clínica Veterinária",
+  "version": "0.1.0",
+  "description": "Audita a máquina do estagiário, conserta o que falta, autentica no GitLab da NDS e clona os projetos onde ele tem issue.",
+  "engines": { "orca": ">=1.4.259" },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "setup",
+        "title": "Setup Clínica Veterinária",
+        "icon": "wrench",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ]
+  },
+  "capabilities": [
+    { "kind": "workspace:read" },
+    { "kind": "terminal:send" },
+    { "kind": "terminal:read" },
+    { "kind": "storage:own" }
+  ]
+}

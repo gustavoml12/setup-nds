@@ -1,14 +1,49 @@
 # Setup Clínica Veterinária
 
-A right-sidebar panel (`src/panel.tsx`) and the plugin's own worker (`src/worker.ts`). The panel asks with `plugin.request`, the worker answers with `orca.panels.handle`, keeps the total in `orca.storage` and tells every open panel with `orca.panels.post`; `src/protocol.ts` types both sides. Orca transpiles both files when they load, so there is no build step: save and the panel or worker reloads (a worker reload drops its in-memory state, so keep what must last in storage). `orca plugin test .` runs `src/panel.test.tsx` and `src/worker.test.ts` in Node with `orca/testing`, and `orca plugin check .` renders the panel with the worker in each `src/panel.check.ts` scenario; `npx --yes -p typescript tsc -p .` type-checks against the typings `orca plugin types .` writes to `.orca/types/`. With the folder loaded, `orca plugin dev request . counter.add --data '{"by":1}'` calls the worker as the panel does.
+Plugin do [Orca](https://github.com/stablyai/orca) que prepara a máquina do estagiário para o projeto da Clínica Veterinária da NDS.
 
-## Develop
+## O que ele faz
+
+Painel na barra lateral direita, em quatro etapas:
+
+1. **Auditoria**: confere os 12 itens do setup (ferramentas, `glab`, agentes etc.). Se não dá para saber o estado de algo, mostra "desconhecido" em vez de um ✔ falso.
+2. **Conserto**: instala o que falta, um item por vez (winget no Windows, gerenciador de pacotes no macOS/Linux).
+3. **GitLab**: confere o login do `glab` na NDS e lista as issues atribuídas ao aluno.
+4. **Clone**: clona os projetos onde o aluno tem issue.
+
+## Instalação (aluno)
+
+```sh
+orca plugin install <owner>/setup-clinica-veterinaria
+```
+
+O Orca mostra a lista de acessos abaixo e só instala depois que você aprova.
+
+## Acessos pedidos
+
+| Acesso | Por quê |
+|---|---|
+| `workspace:read` | saber em qual pasta clonar os projetos |
+| `terminal:send` | rodar os comandos de auditoria, instalação, `glab` e `git clone` em terminais temporários |
+| `terminal:read` | ler a saída desses comandos para montar o checklist |
+| `storage:own` | guardar o estado do setup do próprio plugin |
+
+Sem rede própria: tudo passa por comandos que você pode ver no terminal.
+
+## Nota sobre GitHub e GitLab
+
+O plugin é distribuído pelo GitHub, e o login do aluno é no GitLab da NDS. Já `superpowers` e `ponytail` continuam vindo do GitHub, então precisam de acesso ao GitHub mesmo com o login do GitLab funcionando.
+
+## Limitações
+
+- Testado no macOS; a coluna Windows (winget) ainda não foi validada em máquina real.
+
+## Desenvolvimento
 
 ```sh
 orca plugin validate .
-orca plugin dev watch .    # loads this folder into Orca and prints its logs and reloads; Ctrl-C unloads it
+npx --yes -p typescript tsc -p .
+orca plugin test .
+orca plugin check .
+orca plugin dev watch .
 ```
-
-Orca names the publisher after where the plugin is installed from: the GitHub or GitLab owner of
-its repository, or `local` for a folder. See
-https://github.com/stablyai/orca/blob/main/docs/reference/plugin-authoring.md.

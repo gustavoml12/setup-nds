@@ -52,18 +52,9 @@ export interface CloneAnswer {
 
 declare module 'orca' {
   interface PluginRequests {
-    /** The total the worker keeps in storage. */
-    'counter.get': { output: { total: number } }
-    /** Adds `by` to the stored total and answers the new total. */
-    'counter.add': { input: { by: number }; output: { total: number } }
-
     'setup.audit': { output: AuditAnswer }
     'setup.fix': { input: { stepId: StepId }; output: FixAnswer }
     'setup.gitlab': { output: GitlabAnswer }
     'setup.clone': { output: CloneAnswer }
-  }
-  interface PluginPanelEvents {
-    /** Posted to every open panel after the total changes. */
-    'counter.changed': { total: number }
   }
 }

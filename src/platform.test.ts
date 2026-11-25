@@ -46,7 +46,17 @@ describe('detectPlatform', () => {
   })
 
   test('sem process.platform, o path decide', () => {
-    assert.equal(platformFromNode(undefined), null)
-    assert.equal(platformFromPath('C:\\x'), 'win32')
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'process')
+    try {
+      Reflect.deleteProperty(globalThis, 'process')
+      assert.equal(detectPlatform('C:\\x'), 'win32')
+      assert.equal(detectPlatform('/home/aluno'), 'linux')
+      assert.equal(detectPlatform(), null)
+      assert.equal(detectPlatform('rel'), null)
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, 'process', originalDescriptor)
+      }
+    }
   })
 })

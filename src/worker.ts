@@ -64,7 +64,10 @@ export default function activate(orca: OrcaWorkerApi): void {
     const values = parseAudit(output)
     const steps: StepStatus[] = STEPS.map((step) => {
       const status = statusFor(step.id, values)
-      return { id: step.id, title: step.title, group: step.group, status, detail: detailFor(status) }
+      const detail = detailFor(status)
+      const row: StepStatus = { id: step.id, title: step.title, group: step.group, status }
+      if (detail !== undefined) row.detail = detail
+      return row
     })
     return timedOut ? { platform, steps, timedOut: true } : { platform, steps }
   }

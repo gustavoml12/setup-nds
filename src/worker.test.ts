@@ -289,3 +289,45 @@ describe('prazo da auditoria', () => {
     assert.ok(DEADLINES.clone < 120_000, 'clone < 120s')
   })
 })
+
+/** Varre a resposta como o schema JSON do Orca: `undefined` em qualquer ponto é erro. */
+function assertNoUndefined(value: unknown, path: string): void {
+  if (value === undefined) assert.fail(`valor undefined em ${path}`)
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoUndefined(item, `${path}[${index}]`))
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) assertNoUndefined(item, `${path}.${key}`)
+  }
+}
+
+describe('respostas JSON-válidas (sem undefined)', () => {
+  test('resposta de setup.audit não contém undefined, mesmo com steps em ok', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
+    respondTerminal(host, [['VSCODE=1', 'GIT=0', 'AUDIT_DONE']])
+    const tw = await mountWorker(main, { host })
+    const answer = await tw.request('setup.audit')
+    assertNoUndefined(answer, 'resposta')
+    await tw.deactivate()
+  })
+
+  test('nenhuma resposta de handler contém undefined', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
+    respondTerminal(host, [['VSCODE=1', 'GIT=0', 'AUDIT_DONE']])
+    const tw = await mountWorker(main, { host })
+    assertNoUndefined(await tw.request('setup.audit'), 'setup.audit')
+    assertNoUndefined(await tw.request('setup.fix', { stepId: 'git' }), 'setup.fix[start]')
+    assertNoUndefined(await tw.request('setup.fix', { stepId: 'clone' }), 'setup.fix[clone]')
+    assertNoUndefined(await tw.request('setup.gitlab'), 'setup.gitlab')
+    await tw.deactivate()
+
+    const host2 = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
+    const issuesOut = [
+      JSON.stringify([{ web_url: 'https://nds.unirv.edu.br/gitlab/g/a/-/issues/1', iid: 1, title: 'A' }]),
+      'ISSUES_DONE'
+    ]
+    respondTerminal(host2, [issuesOut, ['CLONE_OK_0', 'CLONE_DONE']])
+    const tw2 = await mountWorker(main, { host: host2 })
+    assertNoUndefined(await tw2.request('setup.clone'), 'setup.clone')
+    await tw2.deactivate()
+  })
+})

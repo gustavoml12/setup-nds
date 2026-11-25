@@ -7,6 +7,12 @@ import { detectPlatform } from './platform'
 import { CLONE_MARKER, ISSUES_MARKER, authLoginCommand, cloneCommand, dedupePaths, issuesCommand, parseIssues } from './gitlab'
 
 type ActiveRun = { terminalId: string; marker: string }
+
+type WorkspaceResolution =
+  | { kind: 'found'; workspaceId: string; path: string }
+  | { kind: 'absent' }
+  | { kind: 'error'; detail: string }
+
 export default function activate(orca: OrcaWorkerApi): void {
   const host: Host = { call: (method, params) => orca.host.call(method as never, params as never) }
 
@@ -23,19 +29,25 @@ export default function activate(orca: OrcaWorkerApi): void {
     return run
   }
 
-  async function workspaceOf(): Promise<{ workspaceId: string; path: string } | null> {
-    const context = (await host.call('workspace.readContext', {})) as { workspaceId?: string } | null
-    if (!context?.workspaceId) return null
-    const listed = (await host.call('workspace.list', {})) as {
-      workspaces: { id: string; path: string }[]
+  async function workspaceOf(): Promise<WorkspaceResolution> {
+    try {
+      const context = (await host.call('workspace.readContext', {})) as { workspaceId?: string } | null
+      if (!context?.workspaceId) return { kind: 'absent' }
+      const listed = (await host.call('workspace.list', {})) as {
+        workspaces: { id: string; path: string }[]
+      }
+      const found = listed.workspaces.find((workspace) => workspace.id === context.workspaceId)
+      if (!found) return { kind: 'absent' }
+      return { kind: 'found', workspaceId: found.id, path: found.path }
+    } catch (error) {
+      return { kind: 'error', detail: messageOf(error) }
     }
-    const found = listed.workspaces.find((workspace) => workspace.id === context.workspaceId)
-    return found ? { workspaceId: found.id, path: found.path } : null
   }
 
   async function audit(): Promise<AuditAnswer> {
-    const workspace = await workspaceOf().catch(() => null)
-    if (!workspace) return { platform: null, steps: [], noWorkspace: true }
+    const workspace = await workspaceOf()
+    if (workspace.kind === 'absent') return { platform: null, steps: [], noWorkspace: true }
+    if (workspace.kind === 'error') return { platform: null, steps: [], error: workspace.detail }
 
     const platform = detectPlatform(workspace.path)
     if (!platform) return { platform: null, steps: [], error: 'não consegui determinar o sistema operacional desta máquina' }
@@ -61,15 +73,23 @@ export default function activate(orca: OrcaWorkerApi): void {
 
     const existing = runs.get(stepId)
     if (existing) {
-      const output = await readTerminal(existing.terminalId)
-      if (markerLine(output, existing.marker) === -1) return { done: false, ok: false, detail: 'ainda executando…' }
-      await closeQuietly(host, existing.terminalId)
-      runs.delete(stepId)
-      return { done: true, ok: !output.includes('NEED_ADMIN') && !output.includes('NO_PKG_MANAGER'), detail: summaryOf(output) }
+      try {
+        const output = await readTerminal(existing.terminalId)
+        if (markerLine(output, existing.marker) === -1) return { done: false, ok: false, detail: 'ainda executando…' }
+        await closeQuietly(host, existing.terminalId)
+        runs.delete(stepId)
+        return { done: true, ok: !output.includes('NEED_ADMIN') && !output.includes('NO_PKG_MANAGER'), detail: summaryOf(output) }
+      } catch (error) {
+        // O terminal morreu ou foi fechado: limpa o registro pra um novo start poder nascer.
+        runs.delete(stepId)
+        await closeQuietly(host, existing.terminalId)
+        return { done: true, ok: false, detail: messageOf(error) }
+      }
     }
 
-    const workspace = await workspaceOf().catch(() => null)
-    if (!workspace) return { done: true, ok: false, detail: 'abra uma pasta no Orca para eu poder rodar os comandos' }
+    const workspace = await workspaceOf()
+    if (workspace.kind === 'absent') return { done: true, ok: false, detail: 'abra uma pasta no Orca para eu poder rodar os comandos' }
+    if (workspace.kind === 'error') return { done: true, ok: false, detail: workspace.detail }
 
     const platform = detectPlatform(workspace.path)
     if (!platform) return { done: true, ok: false, detail: 'não consegui determinar o sistema operacional' }
@@ -99,8 +119,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
 
   async function gitlab(): Promise<GitlabAnswer> {
-    const workspace = await workspaceOf().catch(() => null)
-    if (!workspace) return { started: false, detail: 'abra uma pasta no Orca primeiro' }
+    const workspace = await workspaceOf()
+    if (workspace.kind === 'absent') return { started: false, detail: 'abra uma pasta no Orca primeiro' }
+    if (workspace.kind === 'error') return { started: false, detail: workspace.detail }
     try {
       // Terminal que fica aberto: o aluno digita o login. Não é efêmero e não é fechado aqui.
       await host.call('terminal.create', {
@@ -115,8 +136,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
 
   async function issues(): Promise<IssuesAnswer> {
-    const workspace = await workspaceOf().catch(() => null)
-    if (!workspace) return { issues: [], error: 'abra uma pasta no Orca primeiro' }
+    const workspace = await workspaceOf()
+    if (workspace.kind === 'absent') return { issues: [], error: 'abra uma pasta no Orca primeiro' }
+    if (workspace.kind === 'error') return { issues: [], error: workspace.detail }
     const platform = detectPlatform(workspace.path)
     if (!platform) return { issues: [], error: 'não consegui determinar o sistema operacional' }
     try {
@@ -128,8 +150,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
 
   async function clone(): Promise<CloneAnswer> {
-    const workspace = await workspaceOf().catch(() => null)
-    if (!workspace) return { done: true, ok: false, cloned: [], failed: [], detail: 'abra uma pasta no Orca primeiro' }
+    const workspace = await workspaceOf()
+    if (workspace.kind === 'absent') return { done: true, ok: false, cloned: [], failed: [], detail: 'abra uma pasta no Orca primeiro' }
+    if (workspace.kind === 'error') return { done: true, ok: false, cloned: [], failed: [], detail: workspace.detail }
     const platform = detectPlatform(workspace.path)
     if (!platform) return { done: true, ok: false, cloned: [], failed: [], detail: 'não consegui determinar o sistema operacional' }
 

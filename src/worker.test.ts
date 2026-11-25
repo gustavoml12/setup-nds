@@ -32,6 +32,22 @@ describe('setup.audit', () => {
     await tw.deactivate()
   })
 
+  test('erro no host ao listar workspaces → error preenchido e noWorkspace falso/indefinido', async () => {
+    const host = mockHost({
+      results: {
+        'workspace.readContext': CONTEXT,
+        'workspace.list': () => {
+          throw new Error('falha interna do host ao listar')
+        }
+      }
+    })
+    const tw = await mountWorker(main, { host })
+    const answer = (await tw.request('setup.audit')) as { noWorkspace?: boolean; error?: string }
+    assert.equal(answer.noWorkspace, undefined)
+    assert.equal(answer.error, 'falha interna do host ao listar')
+    await tw.deactivate()
+  })
+
   test('lê a saída da auditoria e fecha o terminal', async () => {
     const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
     respondTerminal(host, [['VSCODE=1', 'GIT=0', 'AUDIT_DONE']])
@@ -89,6 +105,33 @@ describe('setup.fix', () => {
     assert.equal(answer.done, true)
     assert.ok(answer.detail.includes('correção própria'), answer.detail)
     assert.deepEqual(host.callsOf('terminal.create'), [])
+    await tw.deactivate()
+  })
+
+  test('terminal.read rejeita durante poll → limpa runs, tenta close e responde ok=false', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't9' } } })
+    const tw = await mountWorker(main, { host })
+
+    // Primeira chamada: inicia e registra terminalId 't9' no runs
+    const first = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean }
+    assert.equal(first.done, false)
+    assert.equal(host.callsOf('terminal.create').length, 1)
+
+    // Segunda chamada: terminal.read falha (ex: terminal fechado pelo usuário)
+    host.respond('terminal.read', () => {
+      throw new Error('terminal destroyed')
+    })
+    const second = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean; ok: boolean; detail: string }
+    assert.equal(second.done, true)
+    assert.equal(second.ok, false)
+    assert.equal(second.detail, 'terminal destroyed')
+    assert.equal(host.callsOf('terminal.close').length, 1)
+
+    // Terceira chamada: com runs limpo, deve ser capaz de criar um novo terminal (start)
+    host.respond('terminal.read', () => ({ lines: ['ainda baixando'], truncated: false }))
+    const third = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean }
+    assert.equal(third.done, false)
+    assert.equal(host.callsOf('terminal.create').length, 2, 'novo terminal foi criado após a limpeza do map')
     await tw.deactivate()
   })
 })

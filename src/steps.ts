@@ -1,9 +1,11 @@
 import type { CmdPlatform, Platform } from './platform'
 import { cmdPlatform } from './platform'
-import { markerLine } from './runner'
+import { markerEcho, markerLine } from './markers'
 
 export const AUDIT_MARKER = 'AUDIT_DONE'
 export const FIX_MARKER = 'FIXED_DONE'
+export const NEED_ADMIN_MARKER = 'NEED_ADMIN'
+export const NO_PKG_MARKER = 'NO_PKG_MANAGER'
 export const GITLAB_HOST_ARG = 'nds.unirv.edu.br/gitlab'
 
 export type StepId =
@@ -47,9 +49,9 @@ const posixAgent = (id: string, bin: string, sub: string): string =>
   `{ echo "$L" | grep -qi superpowers && echo "$L" | grep -qi ponytail && echo ${id}=1 || echo ${id}=0; }; }`
 
 const posixPackageManager =
-  'if command -v brew >/dev/null 2>&1 then PM=brew; ' +
-  'elif command -v apt-get >/dev/null 2>&1 then PM=apt; ' +
-  'elif command -v dnf >/dev/null 2>&1 then PM=dnf; ' +
+  'if command -v brew >/dev/null 2>&1; then PM=brew; ' +
+  'elif command -v apt-get >/dev/null 2>&1; then PM=apt; ' +
+  'elif command -v dnf >/dev/null 2>&1; then PM=dnf; ' +
   'else PM=none; fi; '
 
 const posixInstall = (brew: string, apt: string, dnf: string): string =>
@@ -57,7 +59,7 @@ const posixInstall = (brew: string, apt: string, dnf: string): string =>
   `if [ "$PM" = brew ]; then ${brew}; ` +
   `elif [ "$PM" = apt ]; then sudo apt-get update -qq && sudo apt-get install -y ${apt}; ` +
   `elif [ "$PM" = dnf ]; then sudo dnf install -y ${dnf}; ` +
-  'else echo NO_PKG_MANAGER; fi; '
+  `else ${markerEcho(NO_PKG_MARKER, 'posix')}; fi; `
 
 // --- fragmentos PowerShell ---
 
@@ -71,16 +73,6 @@ const winAgent = (id: string, bin: string, sub: string): string =>
 
 const winWinget = (id: string): string =>
   `winget install ${id} -e --accept-package-agreements --accept-source-agreements`
-
-/** Quebra o marcador na fonte, nas duas cascas: o eco carrega o texto com as aspas / com o
- *  `+`, a saída carrega o marcador limpo. */
-function markerEcho(marker: string, platform: CmdPlatform): string {
-  const head = marker.replace(/_.*$/, '')
-  const tail = marker.slice(head.length)
-  return platform === 'win32'
-    ? `Write-Output ('${head}' + '${tail}')`
-    : `echo ${head}""${tail}`
-}
 
 // --- catálogo ---
 
@@ -105,14 +97,14 @@ export const STEPS: readonly StepDef[] = [
         `if [ "$PM" = brew ]; then brew install node; ` +
         `elif [ "$PM" = apt ]; then curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs; ` +
         `elif [ "$PM" = dnf ]; then curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash - && sudo dnf install -y nodejs; ` +
-        `else echo NO_PKG_MANAGER; fi; ${markerEcho(FIX_MARKER, 'posix')}`,
+        `else ${markerEcho(NO_PKG_MARKER, 'posix')}; fi; ${markerEcho(FIX_MARKER, 'posix')}`,
       win32: `${winWinget('OpenJS.NodeJS.LTS')}; ${markerEcho(FIX_MARKER, 'win32')}`
     } },
   { id: 'opencode', title: 'OpenCode', group: 'ferramentas',
     check: { posix: posixTool('OPENCODE', 'opencode'), win32: winTool('OPENCODE', 'opencode') },
     fix: {
-      posix: `npm install -g @opencode/cli || sudo -n npm install -g @opencode/cli || echo NEED_ADMIN; ${markerEcho(FIX_MARKER, 'posix')}`,
-      win32: `npm install -g @opencode/cli; if ($LASTEXITCODE -ne 0) { 'NEED_ADMIN' }; ${markerEcho(FIX_MARKER, 'win32')}`
+      posix: `npm install -g @opencode/cli || sudo -n npm install -g @opencode/cli || ${markerEcho(NEED_ADMIN_MARKER, 'posix')}; ${markerEcho(FIX_MARKER, 'posix')}`,
+      win32: `npm install -g @opencode/cli; if ($LASTEXITCODE -ne 0) { ${markerEcho(NEED_ADMIN_MARKER, 'win32')} }; ${markerEcho(FIX_MARKER, 'win32')}`
     } },
   { id: 'oc-plugins', title: 'Plugins do OpenCode (superpowers + ponytail)', group: 'ferramentas',
     check: {

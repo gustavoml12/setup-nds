@@ -1,5 +1,6 @@
 import { assert, describe, mockHost, mountWorker, test } from 'orca/testing'
-import { auditCommand } from './steps'
+import { DEADLINES } from './runner'
+import { auditCommand, fixCommand } from './steps'
 import * as main from './worker'
 
 const CONTEXT = { workspaceId: 'w1', branch: 'main', displayName: 'w1', terminals: [] }
@@ -136,6 +137,70 @@ describe('setup.fix', () => {
   })
 })
 
+describe('setup.fix: marcadores de falha e prazo', () => {
+  const echoOf = (id: 'opencode' | 'git') => fixCommand(id, 'linux') as string
+
+  test('o eco do comando (com NEED_ADMIN quebrado) não derruba um fix que deu certo', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't9' } } })
+    respondTerminal(host, [[echoOf('opencode'), 'FIXED_DONE']])
+    const tw = await mountWorker(main, { host })
+    await tw.request('setup.fix', { stepId: 'opencode' })
+    const done = (await tw.request('setup.fix', { stepId: 'opencode' })) as { ok: boolean; detail: string }
+    assert.equal(done.ok, true)
+    assert.equal(done.detail, 'concluído')
+    await tw.deactivate()
+  })
+
+  test('NEED_ADMIN de verdade, como linha própria, ainda reprova', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't9' } } })
+    respondTerminal(host, [[echoOf('opencode'), 'NEED_ADMIN', 'FIXED_DONE']])
+    const tw = await mountWorker(main, { host })
+    await tw.request('setup.fix', { stepId: 'opencode' })
+    const done = (await tw.request('setup.fix', { stepId: 'opencode' })) as { ok: boolean; detail: string }
+    assert.equal(done.ok, false)
+    assert.ok(done.detail.includes('administrador'))
+    await tw.deactivate()
+  })
+
+  test('NO_PKG_MANAGER de verdade reprova', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't9' } } })
+    respondTerminal(host, [['NO_PKG_MANAGER', 'FIXED_DONE']])
+    const tw = await mountWorker(main, { host })
+    await tw.request('setup.fix', { stepId: 'git' })
+    const done = (await tw.request('setup.fix', { stepId: 'git' })) as { ok: boolean }
+    assert.equal(done.ok, false)
+    await tw.deactivate()
+  })
+
+  test('prazo estourado: fecha o terminal, limpa runs e devolve done com ok=false', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't9' } } })
+    respondTerminal(host, [['[sudo] password for aluno:']])
+    const tw = await mountWorker(main, { host })
+    const realNow = Date.now
+    let now = realNow()
+    Date.now = () => now
+    try {
+      const first = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean }
+      assert.equal(first.done, false)
+      now += DEADLINES.fix - 1_000
+      const waiting = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean }
+      assert.equal(waiting.done, false, 'dentro do prazo continua esperando')
+      now += 2_000
+      const expired = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean; ok: boolean; detail: string }
+      assert.equal(expired.done, true)
+      assert.equal(expired.ok, false)
+      assert.equal(expired.detail, 'tempo esgotado — veja o terminal do Orca')
+      assert.equal(host.callsOf('terminal.close').length, 1)
+      const again = (await tw.request('setup.fix', { stepId: 'git' })) as { done: boolean }
+      assert.equal(again.done, false, 'runs foi limpo: um novo start nasce')
+      assert.equal(host.callsOf('terminal.create').length, 2)
+    } finally {
+      Date.now = realNow
+    }
+    await tw.deactivate()
+  })
+})
+
 describe('fila serializada', () => {
   test('a segunda operação só cria terminal depois da primeira fechar', async () => {
     const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
@@ -164,6 +229,36 @@ describe('setup.clone', () => {
     const answer = (await tw.request('setup.clone')) as { ok: boolean; detail: string }
     assert.equal(answer.ok, false)
     assert.deepEqual(host.callsOf('terminal.create'), [])
+    await tw.deactivate()
+  })
+
+  const ISSUES_OUT = [
+    JSON.stringify([
+      { web_url: 'https://nds.unirv.edu.br/gitlab/g/a/-/issues/1', iid: 1, title: 'A' },
+      { web_url: 'https://nds.unirv.edu.br/gitlab/g/b/-/issues/2', iid: 2, title: 'B' }
+    ]),
+    'ISSUES_DONE'
+  ]
+
+  test('um repo falho não marca os outros: veredito por linha CLONE_OK_n / CLONE_ERR_n', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
+    // Primeira leitura: issues. Segunda: clone — o eco longo está no buffer e cita os dois caminhos.
+    respondTerminal(host, [ISSUES_OUT, ['git clone g/a g/b', 'fatal: destination path \'b\' already exists', 'CLONE_OK_0', 'CLONE_ERR_1', 'CLONE_DONE']])
+    const tw = await mountWorker(main, { host })
+    const answer = (await tw.request('setup.clone')) as { ok: boolean; cloned: string[]; failed: { path: string }[] }
+    assert.equal(answer.ok, false)
+    assert.deepEqual(answer.cloned, ['g/a'])
+    assert.deepEqual(answer.failed.map((f) => f.path), ['g/b'])
+    await tw.deactivate()
+  })
+
+  test('todos OK → ok=true', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
+    respondTerminal(host, [ISSUES_OUT, ['CLONE_OK_0', 'CLONE_OK_1', 'CLONE_DONE']])
+    const tw = await mountWorker(main, { host })
+    const answer = (await tw.request('setup.clone')) as { ok: boolean; cloned: string[] }
+    assert.equal(answer.ok, true)
+    assert.deepEqual(answer.cloned, ['g/a', 'g/b'])
     await tw.deactivate()
   })
 })

@@ -4,6 +4,7 @@ import {
   cloneCommand,
   dedupePaths,
   issuesCommand,
+  parseClone,
   parseIssues,
   projectPathFromWebUrl,
   shellQuote
@@ -113,7 +114,8 @@ describe('cloneCommand', () => {
   test('só clona o que ainda não existe e termina no marcador', () => {
     const command = cloneCommand(['g/a', 'g/b'], '/home/aluno/dev', 'darwin')
     // shellQuote em POSIX usa aspas simples — é o que escapa apóstrofos direito.
-    assert.ok(command.includes("-d 'g/a'"))
+    assert.ok(command.includes("-d 'a'"), 'checa a pasta do último segmento')
+    assert.ok(command.includes("git clone -q 'https://nds.unirv.edu.br/gitlab/g/a.git' 'a'"), 'destino explícito')
     assert.ok(command.includes('https://nds.unirv.edu.br/gitlab/g/a.git'))
     assert.ok(command.includes('CLONE""_DONE'))
   })
@@ -128,6 +130,30 @@ describe('cloneCommand', () => {
     const command = cloneCommand(['g/a'], "C:\\Users\\aluno\\dev", 'win32')
     assert.ok(command.includes("'C:\\Users\\aluno\\dev'"))
     assert.ok(command.includes("('CLONE' + '_DONE')"))
+  })
+})
+
+describe('marcadores por repositório', () => {
+  test('quebrados na fonte nos dois dialetos: o eco nunca casa', () => {
+    const posix = cloneCommand(['g/a', 'g/b'], '/w', 'darwin')
+    const win = cloneCommand(['g/a', 'g/b'], 'C:\\w', 'win32')
+    for (const marker of ['CLONE_OK_0', 'CLONE_ERR_0', 'CLONE_OK_1', 'CLONE_ERR_1']) {
+      assert.ok(!posix.includes(marker), `${marker} inteiro na fonte POSIX`)
+      assert.ok(!win.includes(marker), `${marker} inteiro na fonte PowerShell`)
+    }
+    assert.ok(posix.includes('CLONE""_OK_0') && posix.includes('CLONE""_ERR_1'))
+    assert.ok(win.includes("('CLONE' + '_OK_0')") && win.includes("('CLONE' + '_ERR_1')"))
+    assert.ok(!win.includes('&&') && !win.includes('||'))
+  })
+
+  test('parseClone: um veredito por repo; o eco não conta; sem resposta é falha', () => {
+    const paths = ['g/a', 'g/b', 'g/c']
+    const echo = cloneCommand(paths, '/w', 'darwin')
+    const out = [echo, 'fatal: algo', 'CLONE_OK_0', 'CLONE_ERR_1', 'CLONE_DONE'].join('\n')
+    const verdict = parseClone(out, paths)
+    assert.deepEqual(verdict.cloned, ['g/a'])
+    assert.deepEqual(verdict.failed.map((f) => f.path), ['g/b', 'g/c'])
+    assert.deepEqual(parseClone(echo, paths).cloned, [], 'só o eco: nada é sucesso')
   })
 })
 

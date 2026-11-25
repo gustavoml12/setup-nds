@@ -1,5 +1,5 @@
 import { assert, describe, test } from 'orca/testing'
-import { auditCommand, fixCommand, parseAudit, AUDIT_MARKER, FIX_MARKER, STEPS } from './steps'
+import { NEED_ADMIN_MARKER, NO_PKG_MARKER, auditCommand, fixCommand, parseAudit, AUDIT_MARKER, FIX_MARKER, STEPS } from './steps'
 
 describe('auditCommand', () => {
   test('windows e posix nunca são o mesmo texto', () => {
@@ -105,6 +105,30 @@ describe('catálogo', () => {
         if (command === undefined) continue
         assert.ok(!command.includes('&&'), `${step.id} win32 tem &&`)
         assert.ok(!command.includes('||'), `${step.id} win32 tem ||`)
+      }
+    }
+  })
+})
+
+describe('marcadores de falha do fix', () => {
+  test('NEED_ADMIN e NO_PKG_MANAGER vão quebrados na fonte, em toda etapa e casca', () => {
+    for (const step of STEPS) {
+      for (const command of [step.fix?.posix, step.fix?.win32]) {
+        if (!command) continue
+        for (const marker of [NEED_ADMIN_MARKER, NO_PKG_MARKER]) {
+          assert.ok(!command.includes(marker), `${step.id}: ${marker} inteiro na fonte`)
+        }
+      }
+    }
+    assert.ok(fixCommand('opencode', 'darwin')?.includes('NEED""_ADMIN'))
+    assert.ok(fixCommand('opencode', 'win32')?.includes("('NEED' + '_ADMIN')"))
+    assert.ok(fixCommand('git', 'linux')?.includes('NO""_PKG_MANAGER'))
+  })
+
+  test('nenhum `then` fica sem `;` antes na fonte POSIX', () => {
+    for (const step of STEPS) {
+      for (const command of [step.check.posix, step.fix?.posix]) {
+        if (command) assert.ok(!/[^;\s]\s+then\b/.test(command), `${step.id}: then sem ;`)
       }
     }
   })

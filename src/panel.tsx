@@ -15,21 +15,27 @@ import {
   Text,
   type PanelContext
 } from 'orca'
-import type { AuditAnswer, StepStatus } from './protocol'
+import type { AuditAnswer, CloneAnswer, StepStatus } from './protocol'
 import type { StepId } from './steps'
 
 type UiState =
   | { kind: 'loading' }
   | { kind: 'no_workspace' }
-  | { kind: 'error'; message: string }
-  | { kind: 'ready'; steps: StepStatus[]; note?: string }
+  | { kind: 'error'; message: string; title?: string }
+  | { kind: 'ready'; steps: StepStatus[]; note?: string; failure?: string }
 
 const state = atom<UiState>('state', { kind: 'loading' })
 /** Etapa em curso; null = nada rodando. Trava o resto dos botões. */
 const busy = atom<StepId | null>('busy', null)
 
 const GLYPH = { ok: '✔', missing: '✘', skip: '–', unknown: '?' } as const
-const LABEL = { ok: 'ok', missing: 'falta', skip: 'não usado', unknown: '?' } as const
+const LABEL = { ok: 'ok', missing: 'falta', skip: 'não usado', unknown: 'desconhecido' } as const
+
+/** Só vira botão o que tem o que fazer: faltando, não verificável, ou os handlers próprios.
+ *  `ok`/`skip` não instalam nada — um aluno sem `claude` não ganha botão de conserto. */
+function actionable(step: StepStatus): boolean {
+  return step.status === 'missing' || step.status === 'unknown' || step.id === 'glab-auth' || step.id === 'clone'
+}
 
 async function runAction(busyId: StepId, action: () => Promise<boolean>): Promise<boolean> {
   set(busy, busyId)
@@ -70,7 +76,7 @@ async function fix(stepId: StepId): Promise<boolean> {
       const answer = await plugin.request('setup.fix', { stepId }, { timeoutMs: 120_000 })
       if (answer.done) {
         if (!answer.ok) {
-          set(state, { kind: 'error', message: answer.detail || 'Falha ao executar o conserto' })
+          set(state, { kind: 'error', title: 'Não consegui consertar', message: answer.detail || 'Falha ao executar o conserto' })
           return false
         }
         if (!(await audit())) {
@@ -87,23 +93,44 @@ async function fix(stepId: StepId): Promise<boolean> {
 async function loginGitlab(): Promise<boolean> {
   return runAction('glab-auth', async () => {
     const answer = await plugin.request('setup.gitlab')
-    set(state, readyWithNote(answer.detail))
-    return true
+    set(state, answer.started ? readyWithNote(answer.detail) : readyWithFailure(answer.detail))
+    return answer.started
   })
 }
 
 async function cloneProjects(): Promise<boolean> {
   return runAction('clone', async () => {
     const answer = await plugin.request('setup.clone')
-    set(state, readyWithNote(answer.detail))
-    return true
+    const next = withCloneRow(read(state), answer)
+    set(state, answer.ok ? readyWithNote(answer.detail, next) : readyWithFailure(cloneFailure(answer), next))
+    return answer.ok
   })
 }
 
-function readyWithNote(note?: string): UiState {
-  const current = read(state)
+function readyWithNote(note?: string, from: UiState = read(state)): UiState {
+  if (from.kind !== 'ready') return from
+  return { kind: 'ready', steps: from.steps, note }
+}
+
+function readyWithFailure(failure: string, from: UiState = read(state)): UiState {
+  if (from.kind !== 'ready') return from
+  return { kind: 'ready', steps: from.steps, failure }
+}
+
+function cloneFailure(answer: CloneAnswer): string {
+  if (answer.failed.length === 0) return answer.detail
+  return `${answer.detail}: ${answer.failed.map((item) => item.path).join(', ')}`
+}
+
+/** O passo 12 reflete o resultado real do clone, em vez de ficar eternamente em `?`. */
+function withCloneRow(current: UiState, answer: CloneAnswer): UiState {
   if (current.kind !== 'ready') return current
-  return { kind: 'ready', steps: current.steps, note }
+  const steps = current.steps.map((step) =>
+    step.id === 'clone'
+      ? { ...step, status: answer.ok ? ('ok' as const) : ('missing' as const), detail: answer.detail }
+      : step
+  )
+  return { ...current, steps }
 }
 
 export function setup(ctx: PanelContext): void {
@@ -140,7 +167,7 @@ export default function Panel() {
   if (current.kind === 'error') {
     return (
       <Stack gap="md">
-        <Callout tone="danger" title="Não consegui verificar">
+        <Callout tone="danger" title={current.title ?? 'Não consegui verificar'}>
           {current.message}
         </Callout>
         <Button onPress={() => void audit()}>Tentar de novo</Button>
@@ -159,6 +186,7 @@ export default function Panel() {
         </Button>
       </Row>
 
+      {current.failure && <Callout tone="danger" title="Não deu certo">{current.failure}</Callout>}
       {current.note && <Callout tone="accent">{current.note}</Callout>}
 
       <List label="Etapa">
@@ -168,8 +196,12 @@ export default function Panel() {
             title={`${GLYPH[step.status]} ${step.title} — ${LABEL[step.status]}`}
             description={step.detail}
             icon={step.group === 'gitlab' ? 'globe' : step.group === 'agentes' ? 'bot' : 'package'}
-            disabled={running !== null}
-            onPress={() => (step.id === 'glab-auth' ? void loginGitlab() : step.id === 'clone' ? void cloneProjects() : void fix(step.id))}
+            disabled={running !== null || !actionable(step)}
+            onPress={
+              actionable(step)
+                ? () => (step.id === 'glab-auth' ? void loginGitlab() : step.id === 'clone' ? void cloneProjects() : void fix(step.id))
+                : undefined
+            }
           />
         ))}
       </List>
@@ -195,7 +227,7 @@ export default function Panel() {
       </Button>
 
       <Text muted size="xs">
-        {running !== null ? 'Executando… veja o terminal do Orca.' : 'Auditoria completa. Clique em Verificar para de novo.'}
+        {running !== null ? 'Executando… veja o terminal do Orca.' : 'Auditoria completa. Clique em Verificar para conferir de novo.'}
       </Text>
     </Stack>
   )

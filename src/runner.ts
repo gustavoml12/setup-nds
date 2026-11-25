@@ -2,11 +2,13 @@ export type Host = {
   call(method: string, params: Record<string, unknown>): Promise<unknown>
 }
 
-/** `fix` fica abaixo do teto de 120 000 ms do `plugin.request`; o painel rechama até o
- *  marcador aparecer (ver Refinamento 2). */
+/** `audit`/`issues`/`clone` rodam dentro de uma requisição só (teto de 120 000 ms do
+ *  `plugin.request`). `fix` NÃO: o painel rechama `setup.fix` a cada 1,5 s, então o prazo é
+ *  do terminal, não da requisição — 300 s cobrem um `apt`/`winget`/`brew` lento, e um
+ *  `sudo` esperando senha (o terminal fica aberto para o aluno digitar) não trava pra sempre. */
 export const DEADLINES = {
   audit: 20_000,
-  fix: 100_000,
+  fix: 300_000,
   issues: 30_000,
   clone: 100_000
 } as const
@@ -15,25 +17,8 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/**
- * Índice da última linha do output que é exatamente `marker`, ou -1.
- *
- * O PTY ecoa a linha que `terminal.create` recebeu, e essa linha carrega o marcador na
- * forma quebrada (`AUDIT""_DONE`). Exigir a linha inteira deixa o eco incapaz de casar:
- * o eco é uma linha longa com muito texto à volta. Uma linha de saída real é o marcador
- * sozinho.
- */
-export function markerLine(output: string, marker: string): number {
-  const lines = output.split('\n')
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].trim() === marker) return i
-  }
-  return -1
-}
-
-export function hasMarker(output: string, markers: readonly string[]): boolean {
-  return markers.some((marker) => markerLine(output, marker) !== -1)
-}
+export { hasMarker, markerLine } from './markers'
+import { hasMarker } from './markers'
 
 export async function closeQuietly(host: Host, terminalId?: string): Promise<void> {
   if (!terminalId) return

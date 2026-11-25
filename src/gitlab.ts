@@ -1,6 +1,6 @@
 import type { CmdPlatform, Platform } from './platform'
 import { cmdPlatform } from './platform'
-import { markerLine } from './runner'
+import { markerEcho, markerLine } from './markers'
 import type { IssueRow } from './protocol'
 
 export const GITLAB_BASE = 'https://nds.unirv.edu.br/gitlab'
@@ -11,14 +11,6 @@ export const CLONE_MARKER = 'CLONE_DONE'
 export function shellQuote(value: string, platform: CmdPlatform): string {
   if (platform === 'win32') return `'${value.replace(/'/g, "''")}'`
   return `'${value.replace(/'/g, `'\\''`)}'`
-}
-
-function markerEcho(marker: string, platform: CmdPlatform): string {
-  const head = marker.replace(/_.*$/, '')
-  const tail = marker.slice(head.length)
-  return platform === 'win32'
-    ? `Write-Output ('${head}' + '${tail}')`
-    : `echo ${head}""${tail}`
 }
 
 /** Terminal NÃO efêmero: o aluno digita login/senha/token. Quem chama não o fecha.
@@ -36,7 +28,7 @@ export function issuesCommand(platform: Platform): string {
       `$env:GITLAB_HOST = '${GITLAB_HOST_ARG}'; ` +
       `$U = (glab api user 2>$null | ConvertFrom-Json).username; ` +
       `if ([string]::IsNullOrWhiteSpace($U)) { ('NO' + '_USER') } else { ` +
-      `glab api "issues?scope=all&state=opened&assignee_username=$U&per_page=100" 2>$null | Out-String -Stream | Where-Object { $_ -ne '' } | ForEach-Object { $_ }; ` +
+      `(glab api "issues?scope=all&state=opened&assignee_username=$U&per_page=100" 2>$null) -join ''; ` +
       `}; ${markerEcho(ISSUES_MARKER, block)}`
     )
   }
@@ -48,6 +40,16 @@ export function issuesCommand(platform: Platform): string {
   )
 }
 
+/** Pasta onde o git coloca o clone: o último segmento do caminho do projeto. Passada
+ *  explicitamente a `git clone` e usada na checagem de existência — um valor só para os dois. */
+export function cloneDir(path: string): string {
+  return path.split('/').pop() || path
+}
+
+/** Marcadores de resultado por repositório, pelo índice em `paths`. */
+export const cloneOkMarker = (index: number): string => `CLONE_OK_${index}`
+export const cloneErrMarker = (index: number): string => `CLONE_ERR_${index}`
+
 export function cloneCommand(
   paths: readonly string[],
   workspacePath: string,
@@ -58,23 +60,40 @@ export function cloneCommand(
   const marker = markerEcho(CLONE_MARKER, block)
   if (paths.length === 0) return `${cd}; ${marker}`
 
-  if (block === 'win32') {
-    const each = paths
-      .map(
-        (path) =>
-          `if (-not (Test-Path -Path ${shellQuote(path, block)})) { git clone ${shellQuote(`${GITLAB_BASE}/${path}.git`, block)} }`
-      )
-      .join('; ')
-    return `${cd}; ${each}; ${marker}`
-  }
-
   const each = paths
-    .map(
-      (path) =>
-        `[ -d ${shellQuote(path, block)} ] || git clone ${shellQuote(`${GITLAB_BASE}/${path}.git`, block)}`
-    )
+    .map((path, index) => {
+      const dir = shellQuote(cloneDir(path), block)
+      const url = shellQuote(`${GITLAB_BASE}/${path}.git`, block)
+      const ok = markerEcho(cloneOkMarker(index), block)
+      const err = markerEcho(cloneErrMarker(index), block)
+      if (block === 'win32') {
+        return (
+          `if (Test-Path -Path ${dir}) { ${ok} } else { git clone -q ${url} ${dir}; ` +
+          `if ($LASTEXITCODE -eq 0) { ${ok} } else { ${err} } }`
+        )
+      }
+      return `if [ -d ${dir} ] || git clone -q ${url} ${dir}; then ${ok}; else ${err}; fi`
+    })
     .join('; ')
   return `${cd}; ${each}; ${marker}`
+}
+
+export interface CloneVerdict {
+  cloned: string[]
+  failed: { path: string; reason: string }[]
+}
+
+/** Um veredito por repositório, lido só das linhas `CLONE_OK_n` / `CLONE_ERR_n`. Sem
+ *  nenhuma das duas (prazo estourado, linha cortada pela retenção) o repo conta como falha. */
+export function parseClone(output: string, paths: readonly string[]): CloneVerdict {
+  const verdict: CloneVerdict = { cloned: [], failed: [] }
+  paths.forEach((path, index) => {
+    if (markerLine(output, cloneOkMarker(index)) !== -1) verdict.cloned.push(path)
+    else if (markerLine(output, cloneErrMarker(index)) !== -1) {
+      verdict.failed.push({ path, reason: 'o git reportou erro — veja o terminal' })
+    } else verdict.failed.push({ path, reason: 'sem resposta do git — veja o terminal' })
+  })
+  return verdict
 }
 
 /** `.../gitlab/<GRUPO>/Proj/-/issues/12` → `<GRUPO>/Proj`. O host tem path (`/gitlab`),

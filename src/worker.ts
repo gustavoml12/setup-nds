@@ -1,12 +1,12 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import type { AuditAnswer, CloneAnswer, FixAnswer, GitlabAnswer, IssuesAnswer, StepStatus } from './protocol'
 import type { StepId, StepStatusValue } from './steps'
-import { AUDIT_MARKER, FIX_MARKER, STEPS, auditCommand, fixCommand, parseAudit } from './steps'
+import { AUDIT_MARKER, FIX_MARKER, NEED_ADMIN_MARKER, NO_PKG_MARKER, STEPS, auditCommand, fixCommand, parseAudit } from './steps'
 import { DEADLINES, closeQuietly, markerLine, runStep, type Host } from './runner'
 import { detectPlatform } from './platform'
-import { CLONE_MARKER, ISSUES_MARKER, authLoginCommand, cloneCommand, dedupePaths, issuesCommand, parseIssues } from './gitlab'
+import { CLONE_MARKER, ISSUES_MARKER, authLoginCommand, cloneCommand, dedupePaths, issuesCommand, parseClone, parseIssues } from './gitlab'
 
-type ActiveRun = { terminalId: string; marker: string }
+type ActiveRun = { terminalId: string; marker: string; startedAt: number }
 
 type WorkspaceResolution =
   | { kind: 'found'; workspaceId: string; path: string }
@@ -75,10 +75,17 @@ export default function activate(orca: OrcaWorkerApi): void {
     if (existing) {
       try {
         const output = await readTerminal(existing.terminalId)
-        if (markerLine(output, existing.marker) === -1) return { done: false, ok: false, detail: 'ainda executando…' }
+        if (markerLine(output, existing.marker) === -1) {
+          if (Date.now() - existing.startedAt < DEADLINES.fix) return { done: false, ok: false, detail: 'ainda executando…' }
+          // Prazo estourado (ex.: `sudo` esperando senha): solta o painel em vez de travá-lo.
+          runs.delete(stepId)
+          await closeQuietly(host, existing.terminalId)
+          return { done: true, ok: false, detail: 'tempo esgotado — veja o terminal do Orca' }
+        }
         await closeQuietly(host, existing.terminalId)
         runs.delete(stepId)
-        return { done: true, ok: !output.includes('NEED_ADMIN') && !output.includes('NO_PKG_MANAGER'), detail: summaryOf(output) }
+        const failed = markerLine(output, NEED_ADMIN_MARKER) !== -1 || markerLine(output, NO_PKG_MARKER) !== -1
+        return { done: true, ok: !failed, detail: summaryOf(output) }
       } catch (error) {
         // O terminal morreu ou foi fechado: limpa o registro pra um novo start poder nascer.
         runs.delete(stepId)
@@ -109,7 +116,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { done: true, ok: false, detail: messageOf(error) }
     }
 
-    runs.set(stepId, { terminalId, marker: FIX_MARKER })
+    runs.set(stepId, { terminalId, marker: FIX_MARKER, startedAt: Date.now() })
     return { done: false, ok: false, detail: 'executando…' }
   }
 
@@ -165,11 +172,8 @@ export default function activate(orca: OrcaWorkerApi): void {
 
     try {
       const output = await runStep(host, 'setup: clone', cloneCommand(paths, workspace.path, platform), [CLONE_MARKER], DEADLINES.clone)
-      const failed = paths
-        .filter((path) => output.toLowerCase().includes('fatal') && output.includes(path))
-        .map((path) => ({ path, reason: 'o git reportou erro — veja o terminal' }))
-      const cloned = paths.filter((path) => !failed.some((item) => item.path === path))
-      return { done: true, ok: failed.length === 0, cloned, failed, detail: failed.length === 0 ? `${cloned.length} projeto(s) baixado(s)` : 'alguns projetos falharam' }
+      const { cloned, failed } = parseClone(output, paths)
+      return { done: true, ok: failed.length === 0, cloned, failed, detail: failed.length === 0 ? `${cloned.length} projeto(s) baixado(s)` : `${failed.length} projeto(s) falharam` }
     } catch (error) {
       return { done: true, ok: false, cloned: [], failed: paths.map((path) => ({ path, reason: messageOf(error) })), detail: messageOf(error) }
     }
@@ -199,7 +203,7 @@ function statusFor(stepId: StepId, values: Map<string, StepStatusValue>): StepSt
 }
 
 function summaryOf(output: string): string {
-  if (output.includes('NEED_ADMIN')) return 'sem permissão de administrador — rode o comando como admin'
-  if (output.includes('NO_PKG_MANAGER')) return 'nenhum gerenciador de pacotes encontrado (brew/apt/dnf)'
+  if (markerLine(output, NEED_ADMIN_MARKER) !== -1) return 'sem permissão de administrador — rode o comando como admin'
+  if (markerLine(output, NO_PKG_MARKER) !== -1) return 'nenhum gerenciador de pacotes encontrado (brew/apt/dnf)'
   return 'concluído'
 }

@@ -163,3 +163,62 @@ test('Finding A: falha na re-auditoria pós-fix interrompe o loop Consertar tudo
   assert.deepEqual(view.errors, [])
   await view.unmount()
 })
+
+test('Finding 5: linhas ok e skip não são acionáveis — nenhuma instalação é disparada', async () => {
+  let fixCalls = 0
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => READY,
+      'setup.fix': () => {
+        fixCalls++
+        return { done: true, ok: true, detail: 'concluído' }
+      }
+    }
+  })
+  const view = await mount(panel, { host })
+  for (const text of [/Claude Code/, /VS Code/]) {
+    const row = view.find({ text })
+    assert.ok(row)
+    let refused = false
+    try {
+      await view.press(row)
+    } catch (error) {
+      refused = String(error).includes('disabled')
+    }
+    assert.ok(refused, 'a linha está desabilitada')
+  }
+  assert.equal(fixCalls, 0, 'ok/skip não chamam setup.fix')
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('Finding 7/M10: unknown mostra "desconhecido"; clone com sucesso atualiza a linha; falha vira danger', async () => {
+  let ok = true
+  const steps: AuditAnswer['steps'] = [
+    { id: 'gemini', title: 'Gemini CLI', group: 'agentes', status: 'unknown' },
+    { id: 'clone', title: 'Projetos com issue atribuída', group: 'gitlab', status: 'unknown' }
+  ]
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => ({ platform: 'darwin', steps }),
+      'setup.clone': () =>
+        ok
+          ? { done: true, ok: true, cloned: ['g/a'], failed: [], detail: '1 projeto(s) baixado(s)' }
+          : { done: true, ok: false, cloned: [], failed: [{ path: 'g/a', reason: 'x' }], detail: '1 projeto(s) falharam' }
+    }
+  })
+  const view = await mount(panel, { host })
+  assert.ok(view.find({ text: /Gemini CLI — desconhecido/ }))
+  assert.equal(view.find({ text: /Gemini CLI — \?$/ }), null)
+
+  ok = false
+  await view.press(view.find({ text: /Projetos com issue/ })!)
+  assert.ok(view.find({ text: /falharam: g\/a/ }), 'falha do clone aparece')
+  assert.ok(view.find({ text: /Não deu certo/ }), 'em Callout de perigo')
+
+  ok = true
+  await view.press(view.find({ text: /Projetos com issue/ })!)
+  assert.ok(view.find({ text: /✔ Projetos com issue atribuída — ok/ }), 'linha 12 reflete o clone')
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})

@@ -25,6 +25,11 @@ describe('markerLine', () => {
     assert.equal(markerLine(echo, 'AUDIT_DONE'), -1)
   })
 
+  test('linha que só contém o marcador como trecho não casa', () => {
+    // Substring (includes) devolveria 0 aqui; igualdade de linha inteira devolve -1.
+    assert.equal(markerLine('eco: AUDIT_DONE saiu', 'AUDIT_DONE'), -1)
+  })
+
   test('a saída real, uma linha exata, casa — e a última vence', () => {
     const out = ['AUDIT_DONE', 'VSCODE=1', 'AUDIT_DONE'].join('\n')
     assert.equal(markerLine(out, 'AUDIT_DONE'), 2)

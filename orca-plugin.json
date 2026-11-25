@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "setup-nds",
   "name": "Setup NDS",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Audita a máquina do estagiário, conserta o que falta, autentica no GitLab da NDS e clona os projetos onde ele tem issue.",
   "engines": {
     "orca": ">=1.4.259"

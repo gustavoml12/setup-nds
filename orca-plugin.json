@@ -1,7 +1,7 @@
 {
   "manifestVersion": 2,
-  "id": "setup-clinica-veterinaria",
-  "name": "Setup Clínica Veterinária",
+  "id": "setup-nds",
+  "name": "Setup NDS",
   "version": "1.0.0",
   "description": "Audita a máquina do estagiário, conserta o que falta, autentica no GitLab da NDS e clona os projetos onde ele tem issue.",
   "engines": { "orca": ">=1.4.259" },
@@ -12,7 +12,7 @@
     "panels": [
       {
         "id": "setup",
-        "title": "Setup Clínica Veterinária",
+        "title": "Setup NDS",
         "icon": "wrench",
         "entry": "src/panel.tsx",
         "ui": "components"

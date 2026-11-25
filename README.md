@@ -1,6 +1,6 @@
-# Setup Clínica Veterinária
+# Setup NDS
 
-Plugin do [Orca](https://github.com/stablyai/orca) que prepara a máquina do estagiário para o projeto da Clínica Veterinária da NDS.
+Plugin do [Orca](https://github.com/stablyai/orca) que prepara a máquina do estagiário para os projetos da NDS.
 
 ## O que ele faz
 
@@ -14,7 +14,7 @@ Painel na barra lateral direita, em quatro etapas:
 ## Instalação (aluno)
 
 ```sh
-orca plugin install <owner>/setup-clinica-veterinaria
+orca plugin install <owner>/setup-nds
 ```
 
 O Orca mostra a lista de acessos abaixo e só instala depois que você aprova.

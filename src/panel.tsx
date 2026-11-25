@@ -31,6 +31,19 @@ const busy = atom<StepId | null>('busy', null)
 const GLYPH = { ok: '✔', missing: '✘', skip: '–', unknown: '?' } as const
 const LABEL = { ok: 'ok', missing: 'falta', skip: 'não usado', unknown: '?' } as const
 
+async function runAction(busyId: StepId, action: () => Promise<void>): Promise<boolean> {
+  set(busy, busyId)
+  try {
+    await action()
+    return true
+  } catch (error) {
+    set(state, { kind: 'error', message: String(error) })
+    return false
+  } finally {
+    set(busy, null)
+  }
+}
+
 async function audit(): Promise<void> {
   set(state, { kind: 'loading' })
   try {
@@ -46,46 +59,36 @@ async function audit(): Promise<void> {
 }
 
 /** Rechama `setup.fix` até `done`: o pedido tem teto de 120 s e o winget pode passar disso. */
-async function fix(stepId: StepId): Promise<void> {
-  set(busy, stepId)
-  try {
+async function fix(stepId: StepId): Promise<boolean> {
+  return runAction(stepId, async () => {
     for (;;) {
       const answer = await plugin.request('setup.fix', { stepId }, { timeoutMs: 120_000 })
       if (answer.done) {
-        set(state, readyWithNote(answer.ok ? 'concluído' : answer.detail))
+        if (!answer.ok) {
+          set(state, { kind: 'error', message: answer.detail || 'Falha ao executar o conserto' })
+          throw new Error(answer.detail || 'Falha ao executar o conserto')
+        }
+        await audit()
+        set(state, readyWithNote('concluído'))
         return
       }
       await new Promise((resolve) => setTimeout(resolve, 1500))
     }
-  } catch (error) {
-    set(state, { kind: 'error', message: String(error) })
-  } finally {
-    set(busy, null)
-  }
+  })
 }
 
-async function loginGitlab(): Promise<void> {
-  set(busy, 'glab-auth')
-  try {
+async function loginGitlab(): Promise<boolean> {
+  return runAction('glab-auth', async () => {
     const answer = await plugin.request('setup.gitlab')
     set(state, readyWithNote(answer.detail))
-  } catch (error) {
-    set(state, { kind: 'error', message: String(error) })
-  } finally {
-    set(busy, null)
-  }
+  })
 }
 
-async function cloneProjects(): Promise<void> {
-  set(busy, 'clone')
-  try {
+async function cloneProjects(): Promise<boolean> {
+  return runAction('clone', async () => {
     const answer = await plugin.request('setup.clone')
     set(state, readyWithNote(answer.detail))
-  } catch (error) {
-    set(state, { kind: 'error', message: String(error) })
-  } finally {
-    set(busy, null)
-  }
+  })
 }
 
 function readyWithNote(note?: string): UiState {
@@ -112,11 +115,16 @@ export default function Panel() {
 
   if (current.kind === 'no_workspace') {
     return (
-      <EmptyState
-        icon="folder"
-        title="Abra uma pasta no Orca"
-        description="Preciso de um workspace aberto para rodar os comandos da instalação. Depois clique em Verificar."
-      />
+      <Stack gap="md">
+        <EmptyState
+          icon="folder"
+          title="Abra uma pasta no Orca"
+          description="Preciso de um workspace aberto para rodar os comandos da instalação. Depois clique em Verificar."
+        />
+        <Button onPress={() => void audit()} disabled={running !== null}>
+          Verificar
+        </Button>
+      </Stack>
     )
   }
 
@@ -162,8 +170,8 @@ export default function Panel() {
           onPress={() => {
             void (async () => {
               for (const step of missing) {
-                await fix(step.id)
-                await audit()
+                const ok = await fix(step.id)
+                if (!ok) break
               }
             })()
           }}

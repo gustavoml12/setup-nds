@@ -7,7 +7,7 @@ export type Host = {
  *  do terminal, não da requisição — 300 s cobrem um `apt`/`winget`/`brew` lento, e um
  *  `sudo` esperando senha (o terminal fica aberto para o aluno digitar) não trava pra sempre. */
 export const DEADLINES = {
-  audit: 20_000,
+  audit: 100_000,
   fix: 300_000,
   issues: 30_000,
   clone: 100_000

@@ -59,12 +59,14 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { platform, steps: [], error: messageOf(error) }
     }
 
+    const timedOut = markerLine(output, AUDIT_MARKER) === -1
+    if (timedOut) orca.log(`setup.audit: estourou o prazo sem marcador; saída parcial: ${output.slice(0, 200)}`)
     const values = parseAudit(output)
     const steps: StepStatus[] = STEPS.map((step) => {
       const status = statusFor(step.id, values)
       return { id: step.id, title: step.title, group: step.group, status, detail: detailFor(status) }
     })
-    return { platform, steps }
+    return timedOut ? { platform, steps, timedOut: true } : { platform, steps }
   }
 
   async function fix(stepId: StepId): Promise<FixAnswer> {

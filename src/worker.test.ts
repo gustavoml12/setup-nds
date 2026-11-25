@@ -262,3 +262,30 @@ describe('setup.clone', () => {
     await tw.deactivate()
   })
 })
+
+describe('prazo da auditoria', () => {
+  test('auditoria sem marcador responde timedOut, não apenas unknown', async () => {
+    const host = mockHost({ results: { ...READY_HOST, 'terminal.create': { terminalId: 't1' } } })
+    respondTerminal(host, [['CLAUDE=1']])
+    const tw = await mountWorker(main, { host })
+    const realNow = Date.now
+    let now = realNow()
+    Date.now = () => (now += 50_000)
+    try {
+      const answer = (await tw.request('setup.audit')) as { timedOut?: boolean; steps: { status: string }[] }
+      assert.equal(answer.timedOut, true)
+      assert.ok(answer.steps.length > 0, 'a UI ainda desenha a checklist')
+      assert.ok(answer.steps.every((step) => step.status === 'unknown'))
+      assert.ok(tw.logs.some((line) => line.includes('estourou o prazo sem marcador') && line.includes('CLAUDE=1')))
+    } finally {
+      Date.now = realNow
+    }
+    await tw.deactivate()
+  })
+
+  test('DEADLINES.audit tem folga sob o teto de 120s do plugin.request', () => {
+    assert.ok(DEADLINES.audit > 90_000, 'audit > 90s')
+    assert.ok(DEADLINES.audit < 120_000, 'audit < 120s')
+    assert.ok(DEADLINES.clone < 120_000, 'clone < 120s')
+  })
+})

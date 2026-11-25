@@ -222,3 +222,29 @@ test('Finding 7/M10: unknown mostra "desconhecido"; clone com sucesso atualiza a
   assert.deepEqual(view.errors, [])
   await view.unmount()
 })
+
+test('audit e clone recebem timeoutMs explícito (o default de 30s mata o DEADLINES do worker)', async () => {
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => READY,
+      'setup.clone': () => ({ done: true, ok: true, cloned: [], failed: [], detail: '' })
+    }
+  })
+  const view = await mount(panel, { host })
+  await view.press({ text: /Baixar meus projetos/ })
+  const requests = host.callsOf('plugin.request') as Array<{ name: string; timeoutMs?: number }>
+  for (const name of ['setup.audit', 'setup.clone']) {
+    const call = requests.find((request) => request.name === name)
+    assert.ok(call, `${name} foi chamado`)
+    assert.equal(call.timeoutMs, 120_000, `${name} leva timeoutMs explícito`)
+  }
+  await view.unmount()
+})
+
+test('auditoria que estourou o prazo mostra aviso próprio acima da checklist', async () => {
+  const host = mockHost({ requests: { 'setup.audit': () => ({ ...READY, timedOut: true }) } })
+  const view = await mount(panel, { host })
+  assert.ok(view.find({ text: /não terminou a tempo/ }), 'aviso de prazo visível')
+  assert.ok(view.find({ text: /VS Code/ }), 'checklist continua desenhada')
+  await view.unmount()
+})

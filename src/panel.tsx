@@ -22,7 +22,7 @@ type UiState =
   | { kind: 'loading' }
   | { kind: 'no_workspace' }
   | { kind: 'error'; message: string; title?: string }
-  | { kind: 'ready'; steps: StepStatus[]; note?: string; failure?: string }
+  | { kind: 'ready'; steps: StepStatus[]; note?: string; failure?: string; timedOut?: boolean }
 
 const state = atom<UiState>('state', { kind: 'loading' })
 /** Etapa em curso; null = nada rodando. Trava o resto dos botões. */
@@ -52,7 +52,7 @@ async function runAction(busyId: StepId, action: () => Promise<boolean>): Promis
 async function audit(): Promise<boolean> {
   set(state, { kind: 'loading' })
   try {
-    const answer: AuditAnswer = await plugin.request('setup.audit')
+    const answer: AuditAnswer = await plugin.request('setup.audit', undefined, { timeoutMs: 120_000 })
     if (answer.noWorkspace) {
       set(state, { kind: 'no_workspace' })
       return true
@@ -61,7 +61,7 @@ async function audit(): Promise<boolean> {
       set(state, { kind: 'error', message: answer.error })
       return false
     }
-    set(state, { kind: 'ready', steps: answer.steps })
+    set(state, { kind: 'ready', steps: answer.steps, timedOut: answer.timedOut })
     return true
   } catch (error) {
     set(state, { kind: 'error', message: String(error) })
@@ -100,7 +100,7 @@ async function loginGitlab(): Promise<boolean> {
 
 async function cloneProjects(): Promise<boolean> {
   return runAction('clone', async () => {
-    const answer = await plugin.request('setup.clone')
+    const answer = await plugin.request('setup.clone', undefined, { timeoutMs: 120_000 })
     const next = withCloneRow(read(state), answer)
     set(state, answer.ok ? readyWithNote(answer.detail, next) : readyWithFailure(cloneFailure(answer), next))
     return answer.ok
@@ -186,6 +186,9 @@ export default function Panel() {
         </Button>
       </Row>
 
+      {current.timedOut && (
+        <Callout tone="warning">A auditoria não terminou a tempo. Clique em Verificar de novo.</Callout>
+      )}
       {current.failure && <Callout tone="danger" title="Não deu certo">{current.failure}</Callout>}
       {current.note && <Callout tone="accent">{current.note}</Callout>}
 

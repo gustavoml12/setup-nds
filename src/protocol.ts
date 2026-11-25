@@ -15,6 +15,9 @@ export interface AuditAnswer {
   steps: StepStatus[]
   /** workspace.readContext devolveu null: o painel mostra a instrução, não um shell. */
   noWorkspace?: boolean
+  /** A auditoria não terminou no prazo (sem marcador). Diferente de `unknown`: lá o comando
+   *  rodou e não soube dizer; aqui ele não chegou ao fim. `steps` vem todo `unknown`. */
+  timedOut?: boolean
   error?: string
 }
 

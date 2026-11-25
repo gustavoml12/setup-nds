@@ -112,7 +112,7 @@ export const STEPS: readonly StepDef[] = [
     check: { posix: posixTool('OPENCODE', 'opencode'), win32: winTool('OPENCODE', 'opencode') },
     fix: {
       posix: `npm install -g @opencode/cli || sudo -n npm install -g @opencode/cli || echo NEED_ADMIN; ${markerEcho(FIX_MARKER, 'posix')}`,
-      win32: `npm install -g @opencode/cli || echo NEED_ADMIN; ${markerEcho(FIX_MARKER, 'win32')}`
+      win32: `npm install -g @opencode/cli; if ($LASTEXITCODE -ne 0) { 'NEED_ADMIN' }; ${markerEcho(FIX_MARKER, 'win32')}`
     } },
   { id: 'oc-plugins', title: 'Plugins do OpenCode (superpowers + ponytail)', group: 'ferramentas',
     check: {
@@ -179,7 +179,7 @@ export const STEPS: readonly StepDef[] = [
   { id: 'glab-auth', title: 'Login no GitLab da NDS', group: 'gitlab',
     check: {
       posix: `glab auth status --hostname ${GITLAB_HOST_ARG} >/dev/null 2>&1 && echo GLABAUTH=1 || echo GLABAUTH=0`,
-      win32: `if (glab auth status --hostname ${GITLAB_HOST_ARG} 2>$null) { "GLABAUTH=1" } else { "GLABAUTH=0" }`
+      win32: `glab auth status --hostname ${GITLAB_HOST_ARG} 2>$null; if ($LASTEXITCODE -eq 0) { "GLABAUTH=1" } else { "GLABAUTH=0" }`
     } },
   { id: 'clone', title: 'Projetos com issue atribuída', group: 'gitlab',
     check: { posix: `echo CLONE=U`, win32: `"CLONE=U"` } }

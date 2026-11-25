@@ -96,4 +96,16 @@ describe('catálogo', () => {
       assert.ok(step.check.posix.length > 0, `${step.id} sem check posix`)
     }
   })
+
+  test('nenhum comando win32 usa operador de cadeia do PowerShell 7', () => {
+    // && e || são operadores de PowerShell 7. Em 5.1 (powershell.exe, o padrão do Windows)
+    // são erro de parse: a linha inteira não executa, nem o marcador.
+    for (const step of STEPS) {
+      for (const command of [step.check.win32, step.fix?.win32]) {
+        if (command === undefined) continue
+        assert.ok(!command.includes('&&'), `${step.id} win32 tem &&`)
+        assert.ok(!command.includes('||'), `${step.id} win32 tem ||`)
+      }
+    }
+  })
 })

@@ -28,6 +28,9 @@ const state = atom<UiState>('state', { kind: 'loading' })
 /** Etapa em curso; null = nada rodando. Trava o resto dos botões. */
 const busy = atom<StepId | null>('busy', null)
 
+/** Etapas cuja correção é um botão próprio (login interativo, clone dedicado) — não entram no conserto em massa. */
+const OWN_FIX: StepId[] = ['glab-auth', 'clone']
+
 const GLYPH = { ok: '✔', missing: '✘', skip: '–', unknown: '?' } as const
 const LABEL = { ok: 'ok', missing: 'falta', skip: 'não usado', unknown: 'desconhecido' } as const
 
@@ -176,6 +179,7 @@ export default function Panel() {
   }
 
   const missing = current.steps.filter((step) => step.status === 'missing')
+  const automatic = missing.filter((step) => !OWN_FIX.includes(step.id))
 
   return (
     <Stack gap="md">
@@ -209,11 +213,11 @@ export default function Panel() {
         ))}
       </List>
 
-      {missing.length > 0 && (
+      {automatic.length > 0 && (
         <Button
           onPress={() => {
             void (async () => {
-              for (const step of missing) {
+              for (const step of automatic) {
                 const ok = await fix(step.id)
                 if (!ok) break
               }
@@ -221,8 +225,11 @@ export default function Panel() {
           }}
           disabled={running !== null}
         >
-          {`Consertar tudo (${missing.length})`}
+          {`Consertar tudo (${automatic.length})`}
         </Button>
+      )}
+      {missing.length > automatic.length && (
+        <Text muted>Para o login no GitLab e o download de projetos, use os botões dedicados.</Text>
       )}
 
       <Button variant="outline" onPress={() => void cloneProjects()} disabled={running !== null}>

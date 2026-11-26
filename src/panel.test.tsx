@@ -248,3 +248,89 @@ test('auditoria que estourou o prazo mostra aviso próprio acima da checklist', 
   assert.ok(view.find({ text: /VS Code/ }), 'checklist continua desenhada')
   await view.unmount()
 })
+
+const OWN_FIX_STEPS: AuditAnswer['steps'] = [
+  { id: 'glab-auth', title: 'Login no GitLab', group: 'gitlab', status: 'missing' },
+  { id: 'git', title: 'Git', group: 'ferramentas', status: 'missing' },
+  { id: 'vscode', title: 'VS Code', group: 'ferramentas', status: 'missing' }
+]
+
+test('Consertar tudo pula etapas com correção própria e não aborta', async () => {
+  const fixCalls: string[] = []
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => ({ platform: 'darwin', steps: OWN_FIX_STEPS }),
+      'setup.fix': (params: unknown) => {
+        fixCalls.push((params as { stepId: string }).stepId)
+        return { done: true, ok: true, detail: 'concluído' }
+      }
+    }
+  })
+  const view = await mount(panel, { host })
+  await view.press(view.find({ text: /Consertar tudo/ })!)
+  assert.ok(fixCalls.includes('git'), 'git foi consertado')
+  assert.ok(!fixCalls.includes('glab-auth'), 'glab-auth nunca vai para setup.fix')
+  assert.deepEqual(fixCalls, ['git', 'vscode'], 'o loop foi até o fim')
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('a contagem do Consertar tudo só inclui etapas com conserto automático', async () => {
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => ({
+        platform: 'darwin',
+        steps: [
+          { id: 'git', title: 'Git', group: 'ferramentas', status: 'missing' },
+          { id: 'glab-auth', title: 'Login no GitLab', group: 'gitlab', status: 'missing' }
+        ]
+      })
+    }
+  })
+  const view = await mount(panel, { host })
+  assert.ok(view.find({ text: /Consertar tudo \(1\)/ }), 'contagem 1')
+  assert.equal(view.find({ text: /Consertar tudo \(2\)/ }), null)
+  assert.ok(view.find({ text: /botões dedicados/ }), 'nota sobre etapas manuais')
+  await view.unmount()
+})
+
+test('sem etapa automática pendente, o botão não aparece', async () => {
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => ({
+        platform: 'darwin',
+        steps: [{ id: 'glab-auth', title: 'Login no GitLab', group: 'gitlab', status: 'missing' }]
+      })
+    }
+  })
+  const view = await mount(panel, { host })
+  assert.equal(view.find({ text: /Consertar tudo/ }), null)
+  assert.ok(view.find({ text: /botões dedicados/ }), 'indica que o login é pelo botão dele')
+  await view.unmount()
+})
+
+test('clicar na linha do glab-auth continua abrindo o login, não o fix', async () => {
+  let fixCalls = 0
+  let gitlabCalls = 0
+  const host = mockHost({
+    requests: {
+      'setup.audit': () => ({
+        platform: 'darwin',
+        steps: [{ id: 'glab-auth', title: 'Login no GitLab', group: 'gitlab', status: 'missing' }]
+      }),
+      'setup.gitlab': () => {
+        gitlabCalls++
+        return { started: true, detail: 'login aberto' }
+      },
+      'setup.fix': () => {
+        fixCalls++
+        return { done: true, ok: true, detail: 'x' }
+      }
+    }
+  })
+  const view = await mount(panel, { host })
+  await view.press(view.find({ text: /Login no GitLab/ })!)
+  assert.equal(gitlabCalls, 1)
+  assert.equal(fixCalls, 0)
+  await view.unmount()
+})
